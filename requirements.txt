@@ -1,0 +1,8 @@
+transformers
+torch
+pandas
+pydantic
+numpy
+fastapi
+nltk
+uvicorn
