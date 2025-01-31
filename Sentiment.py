@@ -216,12 +216,16 @@ def predict_journal(request: SentimentRequest):
                     response = requests.get(url).json()
                     if "results" in response:
                         for result in response["results"]:
+
+                            photo_reference = result.get("photos", [{}])[0].get("photo_reference", None)
+                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={API_KEY_Location}" if photo_reference else None
                             place = {
                                 "name": result["name"],
                                 "address": result["vicinity"],
                                 "rating": result.get("rating", None),
                                 "types": result["types"],
-                                "user_ratings_total": result.get("user_ratings_total", 0)
+                                "user_ratings_total": result.get("user_ratings_total", 0),
+                                "image": photo_url,
                             }
                             places.append(place)
                             if len(places) >= limit:
