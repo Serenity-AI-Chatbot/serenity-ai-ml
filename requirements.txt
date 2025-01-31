@@ -12,3 +12,5 @@ googleapiclient
 google-api-python-client-stubs
 sentence-transformers
 torch
+python-dotenv
+os

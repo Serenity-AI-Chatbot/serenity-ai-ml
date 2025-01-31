@@ -17,13 +17,14 @@ from googleapiclient.discovery import build
 import requests
 from collections import Counter
 from sentence_transformers import SentenceTransformer, util
+from dotenv import load_dotenv
+import os
+nltk.download('punkt')
+load_dotenv()
 
-nltk.download("punkt")
-
-API_KEY = ""
-SEARCH_ENGINE_ID = ""
-API_KEY_Location = ""
-
+API_KEY = os.getenv('API_KEY')
+SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
+API_KEY_Location = os.getenv("API_KEY_Location")
 
 app = FastAPI()
 
@@ -37,22 +38,6 @@ reverse_label_mapping = {v: k for k, v in label_mapping.items()}
 
 class SentimentRequest(BaseModel):
     text: str 
-
-@app.post("/predict")
-def predict_sentiment(request: SentimentRequest):
-    sentences = sent_tokenize(request.text)
-    
-    inputs = tokenizer(sentences, padding=True, truncation=True, return_tensors="pt")
-    
-    model.eval()
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-        predictions = torch.argmax(logits, dim=-1)
-    
-    predicted_labels = [reverse_label_mapping[label_id] for label_id in predictions.tolist()]
-    
-    return {"sentences": sentences, "predictions": predicted_labels}
 
 
 @app.post("/journal")
@@ -150,28 +135,6 @@ def predict_journal(request: SentimentRequest):
         doc = nlp(keyword)
         return any(ent.label_ == "DATE" for ent in doc.ents)
 
-    '''
-    def get_latest_articles(keywords):
-        service = build("customsearch", "v1", developerKey=API_KEY)
-        query = " ".join(
-            keyword
-            for keyword in keywords
-            if not is_common_word(keyword) and not is_date_related(keyword)
-        )
-        res = service.cse().list(q=query, cx=SEARCH_ENGINE_ID, num=5).execute()
-        articles = []
-        if "items" in res:
-            for item in res["items"]:
-                article = {
-                    "title": item["title"],
-                    "link": item["link"],
-                    "snippet": item["snippet"],
-                }
-                articles.append(article)
-
-        return articles
-    '''
-
     #embedding_model = SentenceTransformer('all-MiniLM-L6-v2') 
     #embedding_model.save("Similarity_Model")
 
@@ -185,7 +148,6 @@ def predict_journal(request: SentimentRequest):
             if not is_common_word(keyword) and not is_date_related(keyword)
         ]
         
-        print(refined_keywords)
         if not refined_keywords:
             return []
 
@@ -278,12 +240,26 @@ def predict_journal(request: SentimentRequest):
     location = "mumbai"
     nearby_places = get_nearby_places(summary_keywords, location)
 
+    sentences = sent_tokenize(request.text)
+    
+    inputs = tokenizer(sentences, padding=True, truncation=True, return_tensors="pt")
+    
+    model.eval()
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        predictions = torch.argmax(logits, dim=-1)
+    
+    predicted_labels = [reverse_label_mapping[label_id] for label_id in predictions.tolist()]
+    
     result = {
         "input_text": input_text,
         "summary": summary,
         "keywords": summary_keywords,
         "latest_articles": latest_articles,
         "nearby_places": nearby_places,
+        "sentences": sentences,
+        "predictions": predicted_labels,
     }
 
     result_json = json.dumps(result, indent=2)
