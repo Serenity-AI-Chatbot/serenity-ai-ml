@@ -1,8 +1,14 @@
 transformers
-torch
 pandas
 pydantic
 numpy
 fastapi
 nltk
 uvicorn
+spacy
+requests
+pickle
+googleapiclient
+google-api-python-client-stubs
+sentence-transformers
+torch
