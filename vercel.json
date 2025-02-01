@@ -12,7 +12,10 @@
             "dest": "/journal"
         }
     ],
-    "installCommand": "pip install -r requirements.txt",
-    "postinstall": "python -m spacy download en_core_web_sm && python -c \"import nltk; nltk.download('punkt')\"",
-    "startCommand": "uvicorn Sentiment:app --host 0.0.0.0 --port 8000"
+    "scripts": {
+        "preinstall": "python3 -m pip install --upgrade pip",
+        "install": "python3 -m pip install -r requirements.txt",
+        "postinstall": "python -m spacy download en_core_web_sm && python -c \"import nltk; nltk.download('punkt')\"",
+        "start": "uvicorn Sentiment:app --host 0.0.0.0 --port 8000"
+    }
 }
