@@ -1,0 +1,12 @@
+{
+    "builds": [
+      {
+        "src": "start.sh",
+        "use": "@vercel/static-build",
+        "config": {
+          "zeroConfig": true
+        }
+      }
+    ]
+  }
+  
