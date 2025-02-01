@@ -1,12 +1,19 @@
 {
+    "version": 2,
     "builds": [
       {
-        "src": "start.sh",
-        "use": "@vercel/static-build",
-        "config": {
-          "zeroConfig": true
-        }
+        "src": "Sentiment.py",
+        "use": "@vercel/python"
       }
-    ]
+    ],
+    "routes": [
+      {
+        "src": "/(.*)",
+        "dest": "Sentiment.py"
+      }
+    ],
+    "scripts": {
+      "postinstall": "python -m spacy download en_core_web_sm && python -c \"import nltk; nltk.download('punkt')\" && pip install -r requirements.txt"
+    }
   }
   
