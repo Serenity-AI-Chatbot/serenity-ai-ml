@@ -12,3 +12,4 @@ sentence-transformers
 torch
 python-dotenv
 gunicorn
+huggingface-hub

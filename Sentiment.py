@@ -19,6 +19,7 @@ from sentence_transformers import SentenceTransformer, util
 from dotenv import load_dotenv
 import os
 #from huggingface_hub import hf_hub_download
+from huggingface_hub import login
 
 nltk.download('punkt')
 load_dotenv()
@@ -26,6 +27,9 @@ load_dotenv()
 API_KEY = os.getenv('API_KEY')
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 API_KEY_Location = os.getenv("API_KEY_Location")
+
+hf_token = os.getenv("HF_TOKEN")
+login(token=hf_token)
 
 app = FastAPI()
 
