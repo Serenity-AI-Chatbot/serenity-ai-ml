@@ -40,6 +40,9 @@ reverse_label_mapping = {v: k for k, v in label_mapping.items()}
 class SentimentRequest(BaseModel):
     text: str 
 
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
 
 @app.post("/journal")
 def predict_journal(request: SentimentRequest):
@@ -277,4 +280,4 @@ def predict_journal(request: SentimentRequest):
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))  
-    app.run(port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port)
