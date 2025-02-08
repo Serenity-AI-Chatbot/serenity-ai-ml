@@ -468,8 +468,7 @@ def predict_journal(request: SentimentRequest):
         "song": song,
     }
 
-    result_json = json.dumps(result, indent=2)
-    return result_json
+    return result
 
 
 if __name__ == "__main__":
