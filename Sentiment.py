@@ -20,6 +20,12 @@ from dotenv import load_dotenv
 import os
 #from huggingface_hub import hf_hub_download
 from huggingface_hub import login
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import cdist
+
 
 nltk.download('punkt')
 load_dotenv()
@@ -263,6 +269,97 @@ def predict_journal(request: SentimentRequest):
         predictions = torch.argmax(logits, dim=-1)
     
     predicted_labels = [reverse_label_mapping[label_id] for label_id in predictions.tolist()]
+
+    #song pred:
+
+    df = pd.read_csv('Datasets/dataset.csv')
+
+    features = ['danceability', 'energy', 'loudness', 'speechiness', 'acousticness',
+                'instrumentalness', 'liveness', 'valence', 'tempo']
+
+    data = df[features]
+
+    mood_mapping = {
+    'sentimental': {'valence': 0.6, 'acousticness': 0.4},
+    'afraid': {'energy': 0.5, 'loudness': 0.4, 'speechiness': 0.3},
+    'proud': {'energy': 0.7, 'danceability': 0.5, 'valence': 0.6},
+    'faithful': {'acousticness': 0.6, 'valence': 0.5},
+    'terrified': {'energy': 0.8, 'loudness': 0.7},
+    'joyful': {'danceability': 0.7, 'valence': 0.8},
+    'angry': {'energy': 0.9, 'loudness': 0.9},
+    'sad': {'acousticness': 0.7, 'valence': 0.2},
+    'jealous': {'energy': 0.6, 'speechiness': 0.5},
+    'grateful': {'acousticness': 0.6, 'valence': 0.7},
+    'prepared': {'energy': 0.6, 'tempo': 0.7},
+    'embarrassed': {'speechiness': 0.6, 'loudness': 0.5},
+    'excited': {'danceability': 0.9, 'energy': 0.8},
+    'annoyed': {'loudness': 0.7, 'speechiness': 0.6},
+    'lonely': {'acousticness': 0.7, 'valence': 0.3},
+    'ashamed': {'acousticness': 0.6, 'speechiness': 0.5},
+    'guilty': {'acousticness': 0.6, 'valence': 0.4},
+    'surprised': {'tempo': 0.8, 'energy': 0.6},
+    'nostalgic': {'acousticness': 0.8, 'valence': 0.5},
+    'confident': {'energy': 0.7, 'danceability': 0.6},
+    'furious': {'energy': 0.9, 'loudness': 0.9},
+    'disappointed': {'valence': 0.3, 'acousticness': 0.6},
+    'caring': {'acousticness': 0.7, 'valence': 0.6},
+    'trusting': {'valence': 0.7, 'acousticness': 0.5},
+    'disgusted': {'speechiness': 0.7, 'loudness': 0.6},
+    'anticipating': {'tempo': 0.7, 'energy': 0.6},
+    'anxious': {'energy': 0.6, 'speechiness': 0.5},
+    'hopeful': {'valence': 0.8, 'danceability': 0.7},
+    'content': {'valence': 0.9, 'acousticness': 0.6},
+    'impressed': {'energy': 0.7, 'valence': 0.8},
+    'apprehensive': {'speechiness': 0.6, 'energy': 0.5},
+    'devastated': {'acousticness': 0.8, 'valence': 0.1, 'danceability': 0.2},
+    }
+
+    scaler = MinMaxScaler()
+    data_scaled = scaler.fit_transform(data)
+
+    model = KMeans()
+
+    kmeans = KMeans(n_clusters=32, random_state=42)
+    df['cluster'] = kmeans.fit_predict(data_scaled)
+
+    centroids = kmeans.cluster_centers_
+
+    def match_mood_to_centroid(centroid, mood_thresholds):
+        score = 0
+        for feature, threshold in mood_thresholds.items():
+            feature_idx = features.index(feature)
+            score += abs(centroid[feature_idx] - threshold)
+        return score
+
+    cluster_moods = {}
+    for i, centroid in enumerate(centroids):
+        scores = {mood: match_mood_to_centroid(centroid, thresholds) 
+                for mood, thresholds in mood_mapping.items()}
+        best_mood = min(scores.items(), key=lambda x: x[1])[0]
+        cluster_moods[i] = best_mood
+
+    def generate_song_for_mood(mood):
+        if mood not in cluster_moods.values():
+            return "Mood not found"
+        for k, v in cluster_moods.items():
+            if v == mood:
+                cluster_id = k
+                break
+        song_features = centroids[cluster_id] 
+        song_attr = scaler.inverse_transform(song_features.reshape(1, -1))[0]  
+        distances = cdist(df[features], song_attr.reshape(1, -1), metric='euclidean').flatten()
+        closest_song_idx = distances[:5]
+        closest_song = df.iloc[closest_song_idx].sort_values('popularity', ascending=False).head(1)
+        return closest_song
+
+    current_mood = max(set(predicted_labels), key=predicted_labels.count)
+    song = generate_song_for_mood(current_mood)
+    print(song['track_name'])
+
+    url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q={song['track_name']}{song['artists']}&key={API_KEY}"
+    response = requests.get(url)
+    link = response.json()['items'][0]['id']['videoId']
+    song = f"https://www.youtube.com/watch?v={link}"   
     
     result = {
         "input_text": input_text,
@@ -272,6 +369,7 @@ def predict_journal(request: SentimentRequest):
         "nearby_places": nearby_places,
         "sentences": sentences,
         "predictions": predicted_labels,
+        "song": song,
     }
 
     result_json = json.dumps(result, indent=2)
