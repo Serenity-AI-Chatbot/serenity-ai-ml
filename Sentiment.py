@@ -26,6 +26,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
 import numpy as np
+import random
 
 
 nltk.download('punkt')
@@ -396,8 +397,8 @@ def predict_journal(request: SentimentRequest):
         cluster_moods[i] = best_mood
         
         # Print cluster analysis (optional)
-        print(f"Cluster {i} assigned to {best_mood} (score: {sorted_moods[0][1]:.3f})")
-        print(f"Next best matches: {sorted_moods[1][0]} ({sorted_moods[1][1]:.3f}), {sorted_moods[2][0]} ({sorted_moods[2][1]:.3f})")
+        #print(f"Cluster {i} assigned to {best_mood} (score: {sorted_moods[0][1]:.3f})")
+        #print(f"Next best matches: {sorted_moods[1][0]} ({sorted_moods[1][1]:.3f}), {sorted_moods[2][0]} ({sorted_moods[2][1]:.3f})")
 
 
     '''
@@ -444,13 +445,12 @@ def predict_journal(request: SentimentRequest):
         
         return closest_songs.iloc[0]  # Return the most popular matching song
 
-
-    current_mood = max(set(predicted_labels), key=predicted_labels.count)
-    print(current_mood)
-    if current_mood == "content":
-        current_mood = "joyful"
+    nono = {'afraid', 'content', 'faithful', 'proud', 'embarrassed', 'excited', 'ashamed', 'surprised', 'furious', 'caring', 'trusting', 'disgusted', 'anticipating', 'anxious', 'hopeful', 'impressed', 'apprehensive'}
+    yesyes = mood_mapping.keys() - nono
+    current_mood = max(set(predicted_labels), key=predicted_labels.count, default=predicted_labels[0])
+    if current_mood in nono:
+        current_mood = random.choice(list(yesyes))
     song = generate_song_for_mood(current_mood)
-    #print(song['track_name'])
 
     url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q={song['track_name']}{song['artists']}&key={API_KEY}"
     response = requests.get(url)

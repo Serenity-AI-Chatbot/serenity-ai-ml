@@ -1,5 +1,6 @@
 transformers
 pandas
+numpy
 pydantic
 numpy
 fastapi
