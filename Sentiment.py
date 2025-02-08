@@ -25,6 +25,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
+import numpy as np
 
 
 nltk.download('punkt')
@@ -324,6 +325,7 @@ def predict_journal(request: SentimentRequest):
 
     centroids = kmeans.cluster_centers_
 
+    '''
     def match_mood_to_centroid(centroid, mood_thresholds):
         score = 0
         for feature, threshold in mood_thresholds.items():
@@ -351,10 +353,104 @@ def predict_journal(request: SentimentRequest):
         closest_song_idx = distances[:5]
         closest_song = df.iloc[closest_song_idx].sort_values('popularity', ascending=False).head(1)
         return closest_song
+    '''
+
+    def match_mood_to_centroid(centroid, mood_thresholds):
+    # Initialize weighted score
+        weighted_score = 0
+        
+        # Define feature weights (you can adjust these)
+        feature_weights = {
+            'valence': 1.5,      # Important for emotional content
+            'energy': 1.2,       # Important for mood intensity
+            'danceability': 1.0,
+            'acousticness': 1.0,
+            'loudness': 0.8,
+            'speechiness': 0.7,
+            'tempo': 0.8,
+            'instrumentalness': 0.5,
+            'liveness': 0.5
+        }
+        
+        for feature, threshold in mood_thresholds.items():
+            if feature in features:  # Check if feature exists
+                feature_idx = features.index(feature)
+                feature_value = centroid[feature_idx]
+                
+                # Calculate weighted difference
+                difference = abs(feature_value - threshold)
+                weight = feature_weights[feature]
+                weighted_score += difference * weight
+        return weighted_score
+
+    cluster_moods = {}
+    for i, centroid in enumerate(centroids):
+        scores = {}
+        for mood, thresholds in mood_mapping.items():
+            score = match_mood_to_centroid(centroid, thresholds)
+            scores[mood] = score
+        
+        # Get top 3 closest moods for this cluster
+        sorted_moods = sorted(scores.items(), key=lambda x: x[1])
+        best_mood = sorted_moods[0][0]
+        cluster_moods[i] = best_mood
+        
+        # Print cluster analysis (optional)
+        print(f"Cluster {i} assigned to {best_mood} (score: {sorted_moods[0][1]:.3f})")
+        print(f"Next best matches: {sorted_moods[1][0]} ({sorted_moods[1][1]:.3f}), {sorted_moods[2][0]} ({sorted_moods[2][1]:.3f})")
+
+
+    '''
+    def generate_song_for_mood(mood):
+        if mood not in cluster_moods.values():
+            return "Mood not found"
+        for k, v in cluster_moods.items():
+            if v == mood:
+                cluster_id = k
+                break
+        song_features = centroids[cluster_id] 
+        song_attr = scaler.inverse_transform(song_features.reshape(1, -1))[0]  
+        distances = cdist(df[features], song_attr.reshape(1, -1), metric='euclidean').flatten()
+        closest_song_idx = distances[:5]
+        closest_song = df.iloc[closest_song_idx].sort_values('popularity', ascending=False).head(1)
+        return closest_song
+    '''
+
+    def generate_song_for_mood(mood):
+        if mood not in mood_mapping:
+            return "Mood not found in mapping"
+            
+        # Find all clusters that match this mood
+        matching_clusters = [k for k, v in cluster_moods.items() if v == mood]
+        
+        if not matching_clusters:
+            return "No clusters found for this mood"
+            
+        # Get the cluster that best represents this mood
+        best_cluster = matching_clusters[0]
+        song_features = centroids[best_cluster]
+        
+        # Transform features back to original scale
+        song_attr = scaler.inverse_transform(song_features.reshape(1, -1))[0]
+        
+        # Calculate distances to all songs
+        distances = cdist(df[features], song_attr.reshape(1, -1), metric='euclidean').flatten()
+        
+        # Get indices of 20 closest songs
+        closest_indices = np.argsort(distances)[:20]
+        
+        # Get top 5 most popular songs from these 20
+        closest_songs = df.iloc[closest_indices].sort_values('popularity', ascending=False).head(5)
+        
+        return closest_songs.iloc[0]  # Return the most popular matching song
+
 
     current_mood = max(set(predicted_labels), key=predicted_labels.count)
+    print(current_mood)
+    if current_mood == "content":
+        current_mood = "joyful"
     song = generate_song_for_mood(current_mood)
-    print(song['track_name'])
+    #print(song['track_name'])
 
     url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q={song['track_name']}{song['artists']}&key={API_KEY}"
     response = requests.get(url)
