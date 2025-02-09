@@ -13,7 +13,10 @@ Serenity AI  is a comprehensive mental health application designed to support us
 - Emergency support features
 
 
-#### Backend FastAPI Repository  
+#### Frontend Repository  
+https://github.com/Serenity-AI-Chatbot/serenity-ai-frontend
+
+#### Backend Repository  
 https://github.com/Serenity-AI-Chatbot/serenity-ai-ml
 
 ## 📸 Project Media
