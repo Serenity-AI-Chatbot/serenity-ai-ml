@@ -25,6 +25,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
+from twilio.twiml.messaging_response import MessagingResponse
 import numpy as np
 import random
 
@@ -51,6 +52,35 @@ class SentimentRequest(BaseModel):
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
+# URL of the Node backend (adjust host/port as needed)
+NODE_BACKEND_URL = "http://3.109.62.243:5000"
+
+@app.post('/whatsapp')
+def whatsapp_webhook():
+    incoming_msg = request.form.get('Body')
+    from_number = request.form.get('From')
+    
+    print(f"Received message from {from_number}: {incoming_msg}")
+
+    payload = {
+        'message': incoming_msg,
+        'from': from_number
+    }
+    try:
+        node_response = requests.post(NODE_BACKEND_URL, json=payload)
+        node_response.raise_for_status()
+        response_json = node_response.json()
+        chat_response = response_json.get('response', 'Sorry, no response received.')
+    except Exception as e:
+        print("Error forwarding to Node backend:", e)
+        chat_response = "Sorry, there was an error processing your request."
+
+    resp = MessagingResponse()
+    msg = resp.message()
+    msg.body(chat_response)
+    return Response(str(resp), mimetype="application/xml")
+
 
 @app.post("/journal")
 def predict_journal(request: SentimentRequest):
