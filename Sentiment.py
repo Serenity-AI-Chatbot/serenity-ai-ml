@@ -27,6 +27,7 @@ from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
 from twilio.twiml.messaging_response import MessagingResponse
 import numpy as np
+from loguru import logger 
 import random
 
 
@@ -64,7 +65,10 @@ def send_message(chat_id, text):
 
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 def telegram_webhook():
+    
+    logger.info("Message Received")
     data = request.get_json()
+    logger.info(data)
     
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
