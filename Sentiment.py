@@ -29,7 +29,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 import numpy as np
 from loguru import logger 
 import random
-import telegram 
+from telegram import Bot
 import httpx
 
 
@@ -43,7 +43,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 #BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 WEBHOOK_URL = "https://serenity-ai-ml.onrender.com/telegram/webhook"
 
-bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 bot.set_webhook(WEBHOOK_URL)
 

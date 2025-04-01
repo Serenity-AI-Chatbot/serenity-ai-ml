@@ -17,4 +17,4 @@ huggingface-hub
 twilio
 loguru 
 httpx
-telegram 
+python-telegram-bot
