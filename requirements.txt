@@ -16,3 +16,5 @@ gunicorn
 huggingface-hub
 twilio
 loguru 
+httpx
+telegram 

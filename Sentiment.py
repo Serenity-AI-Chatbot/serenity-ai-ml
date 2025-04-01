@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 import nltk
 from nltk.tokenize import sent_tokenize
@@ -29,6 +29,8 @@ from twilio.twiml.messaging_response import MessagingResponse
 import numpy as np
 from loguru import logger 
 import random
+import telegram 
+import httpx
 
 
 nltk.download('punkt')
@@ -38,6 +40,14 @@ API_KEY = os.getenv('API_KEY')
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 API_KEY_Location = os.getenv("API_KEY_Location")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+#BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+WEBHOOK_URL = "https://serenity-ai-ml.onrender.com/telegram/webhook"
+
+bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+
+bot.set_webhook(WEBHOOK_URL)
+
+#client = httpx.AsyncClient()
 
 hf_token = os.getenv("HF_TOKEN")
 login(token=hf_token)
@@ -59,29 +69,47 @@ def read_root():
 NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL")
 
 def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    requests.post(url, json=payload)
+    # url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # payload = {"chat_id": chat_id, "text": text}
+    # requests.post(url, json=payload)
+    try:
+        bot.send_message(chat_id=chat_id, text=text)
+    except Exception as e:
+        logger.error(f"Failed to send message: {e}")
 
-@app.post(f"/{TELEGRAM_BOT_TOKEN}")
-def telegram_webhook():
-    
+@app.post(f"/telegram/webhook")
+async def telegram_webhook(req: Request):
+
     logger.info("Message Received")
-    data = request.get_json()
-    logger.info(data)
+    try:
+        data = await req.json()
+    except Exception as e:
+        logger.error(f"Error parsing JSON: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
     
-    if "message" in data and "text" in data["message"]:
-        chat_id = data["message"]["chat"]["id"]
-        user_message = data["message"]["text"]
+    update = telegram.Update.de_json(data, bot)
+    logger.info(update)
+    
+    if update.message and update.message.text:
+        chat_id = update.message.chat.id
+        user_message = update.message.text
         
-        response = requests.post(
-            NODE_BACKEND_URL,
-            json={"message": user_message, "from": chat_id},
-            headers={"X-API-KEY": API_KEY}
-        )
+        try:
+            # here i am calling our node backend for gemini ka response :)
+            async with httpx.AsyncClient() as client:
+                node_response = await client.post(
+                    NODE_BACKEND_URL,
+                    json={"message": user_message, "from": chat_id}
+                )
+                node_response.raise_for_status()
+                response_data = node_response.json()
+        except Exception as e:
+            logger.error(f"Error calling Node backend: {e}")
+            await send_message(chat_id, "Sorry, something went wrong.")
+            return {"status": "error"}, 200
         
-        bot_response = response.json().get("response", "Sorry, something went wrong.")
-        send_message(chat_id, bot_response)
+        bot_response = response_data.get("response", "Sorry, something went wrong.")
+        await send_message(chat_id, bot_response)
     
     return "OK", 200
 
