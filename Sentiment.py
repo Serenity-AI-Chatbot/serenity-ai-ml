@@ -30,6 +30,7 @@ import numpy as np
 from loguru import logger 
 import random
 from telegram import Bot
+import telegram
 import httpx
 
 
