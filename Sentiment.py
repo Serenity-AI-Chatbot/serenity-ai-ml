@@ -46,7 +46,7 @@ WEBHOOK_URL = "https://serenity-ai-ml.onrender.com/telegram/webhook"
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-bot.set_webhook(WEBHOOK_URL)
+#bot.set_webhook(WEBHOOK_URL)
 
 #client = httpx.AsyncClient()
 
@@ -78,7 +78,7 @@ def send_message(chat_id, text):
     except Exception as e:
         logger.error(f"Failed to send message: {e}")
 
-@app.post(f"/telegram/webhook")
+@app.post("/telegram/webhook")
 async def telegram_webhook(req: Request):
 
     logger.info("Message Received")
