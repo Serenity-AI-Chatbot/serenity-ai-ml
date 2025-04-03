@@ -49,7 +49,7 @@ async def telegram_webhook(req: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(process_update, data)
     return JSONResponse(content={"status": "OK"}, status_code=200)
 
-def process_update(data):
+async def process_update(data):
 
     update = telegram.Update.de_json(data, bot)
     logger.info(update)
@@ -67,8 +67,9 @@ def process_update(data):
             )
             node_response.raise_for_status()
             response_data = node_response.json()
+            logger.info(response_data)
             bot_response = response_data.get("response", "Sorry, something went wrong.")
-            send_message(chat_id, bot_response)
+            await send_message(chat_id, bot_response)
 
         except Exception as e:
             logger.error(f"Error calling Node backend: {e}")
