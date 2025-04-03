@@ -10,6 +10,7 @@ from loguru import logger
 from telegram import Bot
 import telegram
 import httpx
+import asyncio
 
 load_dotenv()
 
@@ -27,14 +28,14 @@ def read_root():
 # URL of the Node backend (adjust host/port as needed)
 NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL")
 
-def send_message(chat_id, text):
-    # url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # payload = {"chat_id": chat_id, "text": text}
-    # requests.post(url, json=payload)
-    try:
-        bot.send_message(chat_id=chat_id, text=text)
-    except Exception as e:
-        logger.error(f"Failed to send message: {e}")
+# def send_message(chat_id, text):
+#     # url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+#     # payload = {"chat_id": chat_id, "text": text}
+#     # requests.post(url, json=payload)
+#     try:
+#         bot.send_message(chat_id=chat_id, text=text)
+#     except Exception as e:
+#         logger.error(f"Failed to send message: {e}")
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(req: Request, background_tasks: BackgroundTasks):
@@ -46,7 +47,7 @@ async def telegram_webhook(req: Request, background_tasks: BackgroundTasks):
         logger.error(f"Error parsing JSON: {e}")
         return JSONResponse(content={"status": "error"}, status_code=200)
 
-    background_tasks.add_task(process_update, data)
+    asyncio.add_task(process_update, data)
     return JSONResponse(content={"status": "OK"}, status_code=200)
 
 async def process_update(data):
@@ -61,19 +62,27 @@ async def process_update(data):
         
         try:
             # here i am calling our node backend for gemini ka response :)
-            node_response = requests.post(
-                NODE_BACKEND_URL,
-                json={"message": user_message, "from": chat_id, 'username': user_name}
-            )
+            # node_response = requests.post(
+            #     NODE_BACKEND_URL,
+            #     json={"message": user_message, "from": chat_id, 'username': user_name}
+            # )
+            async with httpx.AsyncClient() as client:
+                node_response = await client.post(
+                    NODE_BACKEND_URL,
+                    json={"message": user_message, "from": chat_id, "username": user_name}
+                )
             node_response.raise_for_status()
             response_data = node_response.json()
             logger.info(response_data)
             bot_response = response_data.get("response", "Sorry, something went wrong.")
-            await send_message(chat_id, bot_response)
+            try:
+                await bot.send_message(chat_id=chat_id, text=bot_response)
+            except Exception as e:
+                logger.error(f"Failed to send message: {e}")
 
         except Exception as e:
             logger.error(f"Error calling Node backend: {e}")
-            send_message(chat_id, "Sorry, something went wrong.")
+            await bot.send_message(chat_id, text="Sorry, something went wrong.")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))  
