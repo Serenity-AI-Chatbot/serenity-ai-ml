@@ -2,15 +2,14 @@
     "version": 2,
     "builds": [
         {
-            "src": "Sentiment.py",
+            "src": "Telegram.py",
             "use": "@vercel/python"
         }
     ],
-    "installCommand": "pip install -r requirements.txt && python -m spacy download en_core_web_sm_trf && python -c \"import nltk; nltk.download('punkt')\"",
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "Sentiment.py"
+            "dest": "Telegram.py"
         }
     ]
 }
