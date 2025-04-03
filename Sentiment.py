@@ -100,12 +100,13 @@ def process_update(data):
     if update.message and update.message.text:
         chat_id = update.message.chat.id
         user_message = update.message.text
+        user_name = update.message.chat.username
         
         try:
             # here i am calling our node backend for gemini ka response :)
             node_response = requests.post(
                 NODE_BACKEND_URL,
-                json={"message": user_message, "from": chat_id}
+                json={"message": user_message, "from": chat_id, 'username': user_name}
             )
             node_response.raise_for_status()
             response_data = node_response.json()
