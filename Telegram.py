@@ -47,7 +47,7 @@ async def telegram_webhook(req: Request, background_tasks: BackgroundTasks):
         logger.error(f"Error parsing JSON: {e}")
         return JSONResponse(content={"status": "error"}, status_code=200)
 
-    asyncio.create_task(process_update, data)
+    asyncio.create_task(process_update(data))
     return JSONResponse(content={"status": "OK"}, status_code=200)
 
 async def process_update(data):
