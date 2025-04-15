@@ -1,12 +1,12 @@
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import nltk
 from nltk.tokenize import sent_tokenize
 import uvicorn
 import spacy
+from spacy.matcher import Matcher
 import requests
 from spacy.lang.en.stop_words import STOP_WORDS
 from string import punctuation
@@ -26,13 +26,10 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from scipy.spatial.distance import cdist
-from twilio.twiml.messaging_response import MessagingResponse
 import numpy as np
-from loguru import logger 
 import random
-from telegram import Bot
-import telegram
-import httpx
+from typing import Optional
+from loguru import logger
 
 
 nltk.download('punkt')
@@ -41,15 +38,6 @@ load_dotenv()
 API_KEY = os.getenv('API_KEY')
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 API_KEY_Location = os.getenv("API_KEY_Location")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-#BASE_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-WEBHOOK_URL = "https://serenity-ai-ml.onrender.com/telegram/webhook"
-
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-
-#bot.set_webhook(WEBHOOK_URL)
-
-#client = httpx.AsyncClient()
 
 hf_token = os.getenv("HF_TOKEN")
 login(token=hf_token)
@@ -62,61 +50,12 @@ reverse_label_mapping = {v: k for k, v in label_mapping.items()}
 
 class SentimentRequest(BaseModel):
     text: str 
+    location: Optional[str] = None
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
 
-# URL of the Node backend (adjust host/port as needed)
-NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL")
-
-def send_message(chat_id, text):
-    # url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # payload = {"chat_id": chat_id, "text": text}
-    # requests.post(url, json=payload)
-    try:
-        bot.send_message(chat_id=chat_id, text=text)
-    except Exception as e:
-        logger.error(f"Failed to send message: {e}")
-
-@app.post("/telegram/webhook")
-async def telegram_webhook(req: Request, background_tasks: BackgroundTasks):
-
-    logger.info("Message Received")
-    try:
-        data = await req.json()
-    except Exception as e:
-        logger.error(f"Error parsing JSON: {e}")
-        return JSONResponse(content={"status": "error"}, status_code=200)
-
-    background_tasks.add_task(process_update, data)
-    return JSONResponse(content={"status": "OK"}, status_code=200)
-
-def process_update(data):
-
-    update = telegram.Update.de_json(data, bot)
-    logger.info(update)
-    
-    if update.message and update.message.text:
-        chat_id = update.message.chat.id
-        user_message = update.message.text
-        user_name = update.message.chat.username
-        
-        try:
-            # here i am calling our node backend for gemini ka response :)
-            node_response = requests.post(
-                NODE_BACKEND_URL,
-                json={"message": user_message, "from": chat_id, 'username': user_name}
-            )
-            node_response.raise_for_status()
-            response_data = node_response.json()
-            bot_response = response_data.get("response", "Sorry, something went wrong.")
-            send_message(chat_id, bot_response)
-
-        except Exception as e:
-            logger.error(f"Error calling Node backend: {e}")
-            send_message(chat_id, "Sorry, something went wrong.")
-        
 @app.post("/journal")
 def predict_journal(request: SentimentRequest):
 
@@ -143,26 +82,95 @@ def predict_journal(request: SentimentRequest):
     def keywords_text(text):
         doc = nlp(text)
         keywords = []
-
+        
+        # Identify activities and places
+        activity_patterns = [
+            [{"POS": "VERB"}, {"POS": "DET", "OP": "?"}, {"POS": "NOUN"}],  # "played basketball"
+            [{"POS": "VERB"}, {"POS": "ADP"}, {"POS": "DET", "OP": "?"}, {"POS": "NOUN"}],  # "went to restaurant"
+            [{"POS": "VERB"}, {"POS": "PART", "OP": "?"}, {"POS": "VERB"}],  # "went swimming"
+            [{"POS": "NOUN"}, {"POS": "ADP"}, {"POS": "DET", "OP": "?"}, {"POS": "NOUN"}]   # "dinner at restaurant"
+        ]
+        
+        # Add activity patterns to matcher
+        matcher = Matcher(nlp.vocab)
+        for i, pattern in enumerate(activity_patterns):
+            matcher.add(f"activity_{i}", [pattern])
+        
+        # Find matches
+        matches = matcher(doc)
+        for match_id, start, end in matches:
+            span = doc[start:end]
+            keywords.append(span.text)
+        
+        # Extract entities (locations, organizations, etc.)
+        for ent in doc.ents:
+            if ent.label_ in ["LOC", "GPE", "ORG", "FAC"]:
+                keywords.append(ent.text)
+        
+        # Extract individual nouns and verbs (excluding stop words)
         for token in doc:
-            if (
-                token.text.lower() not in STOP_WORDS  
-                and token.text not in punctuation  
-                and len(token.text) > 2  
-            ):
-                if token.pos_ in ["NOUN", "ADJ", "PROPN"]:
+            if token.text.lower() not in STOP_WORDS and token.text not in punctuation and len(token.text) > 2:
+                if token.pos_ in ["NOUN", "PROPN"]:
                     keywords.append(token.lemma_)
                 elif token.pos_ == "VERB" and token.dep_ in ["ROOT", "acl"]:
-                    keywords.append(token.lemma_)
-
-        for ent in doc.ents:
-            if ent.text.lower() not in STOP_WORDS:
-                keywords.append(ent.text)
-
+                    # Only add activity verbs
+                    activity_verbs = {"play", "visit", "eat", "drink", "shop", "hike", "swim", "watch", "dance"}
+                    if token.lemma_.lower() in activity_verbs:
+                        keywords.append(token.lemma_)
+        
+        # Count frequencies and get top keywords
         keyword_counts = Counter(keywords)
-        ranked_keywords = [keyword for keyword, _ in keyword_counts.most_common(10)]  
-
+        ranked_keywords = [keyword for keyword, _ in keyword_counts.most_common(15)]
+        
         return ranked_keywords
+    
+    # def filter_location_keywords(keywords):
+    #     filtered = []
+    #     for keyword in keywords:
+    #         doc = nlp(keyword)
+    #         for token in doc:
+    #             if token.pos_ in ["NOUN", "PROPN", "VERB"]:
+    #                 filtered.append(keyword)
+    #                 break
+    #     return list(set(filtered))  
+
+    def filter_location_keywords(keywords):
+        filtered = []
+        activity_verbs = {"play", "visit", "eat", "drink", "shop", "hike", "swim", "watch", "dance", "workout", 
+                        "climb", "read", "study", "exercise", "run", "jog", "bike", "cycle", "walk"}
+        
+        for keyword in keywords:
+            doc = nlp(keyword)
+            # Skip single adjectives like "nice", "good", "bad"
+            if len(doc) == 1 and doc[0].pos_ == "ADJ":
+                continue
+                
+            # Keep activity verbs
+            if len(doc) == 1 and doc[0].pos_ == "VERB" and doc[0].lemma_.lower() in activity_verbs:
+                filtered.append(keyword)
+                continue
+                
+            # Keep sports and activities
+            if any(token.text.lower() in {"basketball", "tennis", "swimming", "hiking", "football", 
+                                        "soccer", "baseball", "cycling", "running", "golf", "yoga", 
+                                        "gym", "fitness", "cooking", "dancing", "shopping", "movie", 
+                                        "concert", "theater", "museum", "gallery", "library", "park", 
+                                        "beach", "mountain", "lake", "river", "forest", "mall", "cafe", 
+                                        "restaurant", "bar", "club", "spa"} for token in doc):
+                filtered.append(keyword)
+                continue
+                
+            # Keep compound terms with nouns
+            if any(token.pos_ in {"NOUN", "PROPN"} for token in doc) and not all(token.is_stop for token in doc):
+                # But reject common irrelevant nouns like "day", "time", "thing", "way"
+                if not all(token.lemma_.lower() in {"day", "time", "thing", "way", "today", "yesterday", 
+                                                "tomorrow", "morning", "evening", "night", "moment", 
+                                                "hour", "minute", "second", "week", "month", "year"} 
+                        for token in doc if token.pos_ == "NOUN"):
+                    filtered.append(keyword)
+                    
+        return list(set(filtered))
+
 
     def calculate_similarity(sent1, sent2):
         doc1 = nlp(sent1)
@@ -270,47 +278,87 @@ def predict_journal(request: SentimentRequest):
         return None
 
     def get_place_type(keyword):
+        # Expanded mapping with more specific categories
         place_type_mapping = {
-            "museum": ["museum", "exhibit"],
-            "restaurant": ["food", "cuisine", "restaurant", "dining"],
-            "park": ["nature", "outdoors", "park", "garden"],
-            "hotel": ["stay", "hotel", "resort"],
-            "landmark": ["monument", "landmark", "sightseeing"],
-            "shopping_mall": ["shopping", "mall", "retail"],
-            "library": ["library", "books", "study"],
-            "cafe": ["cafe", "coffee", "tea"]
+            "museum": ["museum", "exhibit", "gallery", "art", "history", "science"],
+            "restaurant": ["food", "cuisine", "restaurant", "dining", "lunch", "dinner", "eat", "breakfast", 
+                        "brunch", "buffet", "meal", "feast", "dine"],
+            "park": ["nature", "outdoors", "park", "garden", "walk", "trail", "picnic", "playground"],
+            "hotel": ["stay", "hotel", "resort", "lodging", "accommodation", "motel", "inn"],
+            "landmark": ["monument", "landmark", "sightseeing", "attraction", "tour", "historic", "heritage"],
+            "shopping_mall": ["shopping", "mall", "retail", "store", "shop", "boutique", "outlet"],
+            "library": ["library", "books", "study", "read", "literature", "research"],
+            "cafe": ["cafe", "coffee", "tea", "bakery", "dessert", "pastry"],
+            "gym": ["gym", "fitness", "workout", "exercise", "training", "sport", "athletic"],
+            "bar": ["bar", "pub", "club", "nightlife", "drink", "beer", "wine", "cocktail"],
+            "movie_theater": ["movie", "cinema", "theater", "film", "watch"],
+            "aquarium": ["aquarium", "fish", "marine", "ocean", "sea", "underwater"],
+            "zoo": ["zoo", "animal", "wildlife"],
+            "stadium": ["stadium", "arena", "game", "match", "sport"],
+            "beach": ["beach", "ocean", "sea", "sand", "swim", "surf", "sunbathe"],
+            "spa": ["spa", "massage", "wellness", "relax", "therapy"],
+            "amusement_park": ["amusement", "theme park", "fun", "ride", "roller coaster"]
         }
+        
+        # Check if any word in keyword matches any category
         for place_type, words in place_type_mapping.items():
             if any(word in keyword.lower() for word in words):
                 return place_type
-        return None 
+            
+        return None  # No relevant type found
 
     def get_nearby_places(keywords, location, limit=10):
         places = []
         geocode = get_geocode(location)
+        
         if geocode:
-            for keyword in keywords:
-                if not is_common_word(keyword) and not is_date_related(keyword):
-                    place_type = get_place_type(keyword)  
-                    query_param = place_type if place_type else keyword 
-                    url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={geocode}&radius=5000&keyword={query_param}&key={API_KEY_Location}"
-                    response = requests.get(url).json()
-                    if "results" in response:
-                        for result in response["results"]:
-
-                            photo_reference = result.get("photos", [{}])[0].get("photo_reference", None)
-                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={API_KEY_Location}" if photo_reference else None
-                            place = {
-                                "name": result["name"],
-                                "address": result["vicinity"],
-                                "rating": result.get("rating", None),
-                                "types": result["types"],
-                                "user_ratings_total": result.get("user_ratings_total", 0),
-                                "image": photo_url,
-                            }
+            # Use our improved filtering function
+            filtered_keywords = filter_location_keywords(keywords)
+            logger.info(f"Filtered keywords for location search: {filtered_keywords}")
+            
+            # Track which keywords yielded results
+            keyword_results = {}
+            
+            for keyword in filtered_keywords:
+                place_type = get_place_type(keyword)
+                
+                # If we identified a specific place type, use that with the keyword
+                if place_type:
+                    url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={geocode}&radius=5000&keyword={place_type}&key={API_KEY_Location}"
+                else:
+                    url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={geocode}&radius=5000&keyword={keyword}&key={API_KEY_Location}"
+                
+                response = requests.get(url).json()
+                
+                if "results" in response and response["results"]:
+                    keyword_results[keyword] = len(response["results"])
+                    
+                    for result in response["results"][:3]:  # Limit to top 3 per keyword for diversity
+                        photo_reference = result.get("photos", [{}])[0].get("photo_reference", None)
+                        photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={API_KEY_Location}" if photo_reference else None
+                        
+                        # Create a place object
+                        place = {
+                            "name": result.get("name","Not Found"),
+                            "address": result.get("vicinity","Not Found"),
+                            "rating": result.get("rating", 0),
+                            "types": result.get("types","Not Found"),
+                            "user_ratings_total": result.get("user_ratings_total", 0),
+                            "image": photo_url,
+                        }
+                        
+                        # Check if this is a duplicate before adding
+                        if not any(p["name"] == place["name"] for p in places):
                             places.append(place)
-                            if len(places) >= limit:
-                                return places
+                            
+                        if len(places) >= limit:
+                            logger.info(f"Keyword results summary: {keyword_results}")
+                            places = sorted(places, key=lambda x: (-x["rating"] if x["rating"] else 0, -x["user_ratings_total"]))
+                            return places[:limit]
+            
+            logger.info(f"Keyword results summary: {keyword_results}")
+        
+        # If we got here, we either have no geocode or not enough places yet
         places = sorted(places, key=lambda x: (-x["rating"] if x["rating"] else 0, -x["user_ratings_total"]))
         return places[:limit]
 
@@ -322,7 +370,8 @@ def predict_journal(request: SentimentRequest):
 
     latest_articles = get_latest_articles(summary_keywords)
 
-    location = "mumbai"
+    location = request.location if request.location is not None else "pune"
+
     nearby_places = get_nearby_places(summary_keywords, location)
 
     sentences = sent_tokenize(request.text)
@@ -391,36 +440,6 @@ def predict_journal(request: SentimentRequest):
 
     centroids = kmeans.cluster_centers_
 
-    '''
-    def match_mood_to_centroid(centroid, mood_thresholds):
-        score = 0
-        for feature, threshold in mood_thresholds.items():
-            feature_idx = features.index(feature)
-            score += abs(centroid[feature_idx] - threshold)
-        return score
-
-    cluster_moods = {}
-    for i, centroid in enumerate(centroids):
-        scores = {mood: match_mood_to_centroid(centroid, thresholds) 
-                for mood, thresholds in mood_mapping.items()}
-        best_mood = min(scores.items(), key=lambda x: x[1])[0]
-        cluster_moods[i] = best_mood
-
-    def generate_song_for_mood(mood):
-        if mood not in cluster_moods.values():
-            return "Mood not found"
-        for k, v in cluster_moods.items():
-            if v == mood:
-                cluster_id = k
-                break
-        song_features = centroids[cluster_id] 
-        song_attr = scaler.inverse_transform(song_features.reshape(1, -1))[0]  
-        distances = cdist(df[features], song_attr.reshape(1, -1), metric='euclidean').flatten()
-        closest_song_idx = distances[:5]
-        closest_song = df.iloc[closest_song_idx].sort_values('popularity', ascending=False).head(1)
-        return closest_song
-    '''
-
     def match_mood_to_centroid(centroid, mood_thresholds):
     # Initialize weighted score
         weighted_score = 0
@@ -466,22 +485,6 @@ def predict_journal(request: SentimentRequest):
         #print(f"Next best matches: {sorted_moods[1][0]} ({sorted_moods[1][1]:.3f}), {sorted_moods[2][0]} ({sorted_moods[2][1]:.3f})")
 
 
-    '''
-    def generate_song_for_mood(mood):
-        if mood not in cluster_moods.values():
-            return "Mood not found"
-        for k, v in cluster_moods.items():
-            if v == mood:
-                cluster_id = k
-                break
-        song_features = centroids[cluster_id] 
-        song_attr = scaler.inverse_transform(song_features.reshape(1, -1))[0]  
-        distances = cdist(df[features], song_attr.reshape(1, -1), metric='euclidean').flatten()
-        closest_song_idx = distances[:5]
-        closest_song = df.iloc[closest_song_idx].sort_values('popularity', ascending=False).head(1)
-        return closest_song
-    '''
-
     def generate_song_for_mood(mood):
         if mood not in mood_mapping:
             return "Mood not found in mapping"
@@ -516,6 +519,8 @@ def predict_journal(request: SentimentRequest):
     if current_mood in nono:
         current_mood = random.choice(list(yesyes))
     song = generate_song_for_mood(current_mood)
+
+    logger.info(f"SONG IS ->>>>>>> {song}")
 
     url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&q={song['track_name']}{song['artists']}&key={API_KEY}"
     response = requests.get(url)
