@@ -142,6 +142,10 @@ def predict_journal(request: SentimentRequest):
         for keyword in keywords:
             doc = nlp(keyword)
             # Skip single adjectives like "nice", "good", "bad"
+
+            if keyword == 'lot':
+                continue
+            
             if len(doc) == 1 and doc[0].pos_ == "ADJ":
                 continue
                 
