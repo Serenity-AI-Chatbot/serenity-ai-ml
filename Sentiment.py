@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import nltk
 from nltk.tokenize import sent_tokenize
@@ -30,6 +30,7 @@ import numpy as np
 import random
 from typing import Optional
 from loguru import logger
+import asyncio
 
 
 nltk.download('punkt')
@@ -38,6 +39,7 @@ load_dotenv()
 API_KEY = os.getenv('API_KEY')
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 API_KEY_Location = os.getenv("API_KEY_Location")
+DEFAULT_WEBHOOK_URL = os.getenv("DEFAULT_WEBHOOK_URL")
 
 hf_token = os.getenv("HF_TOKEN")
 login(token=hf_token)
@@ -51,6 +53,12 @@ reverse_label_mapping = {v: k for k, v in label_mapping.items()}
 class SentimentRequest(BaseModel):
     text: str 
     location: Optional[str] = None
+
+class AsyncSentimentRequest(BaseModel):
+    text: str
+    location: Optional[str] = None
+    journal_id: str
+    webhook_url: Optional[str] = None
 
 @app.get("/")
 def read_root():
@@ -544,6 +552,65 @@ def predict_journal(request: SentimentRequest):
 
     return result
 
+@app.post("/journal-async")
+async def predict_journal_async(request: AsyncSentimentRequest, background_tasks: BackgroundTasks):
+    # Use the webhook URL from the request or fall back to the default from .env
+    webhook_url = request.webhook_url or DEFAULT_WEBHOOK_URL
+    
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="No webhook URL provided in request or environment variables")
+    
+    # Add the processing task to background tasks
+    background_tasks.add_task(
+        process_journal_async, 
+        request.text, 
+        request.location, 
+        request.journal_id, 
+        webhook_url
+    )
+    
+    # Return immediately with processing status
+    return {
+        "status": "processing",
+        "journal_id": request.journal_id,
+        "message": "Journal analysis started. Results will be sent to the webhook URL when complete."
+    }
+
+async def process_journal_async(text: str, location: Optional[str], journal_id: str, webhook_url: str):
+    try:
+        # Create a SentimentRequest to reuse the existing logic
+        sentiment_request = SentimentRequest(text=text, location=location)
+        
+        # Process the journal entry using the existing function
+        result = predict_journal(sentiment_request)
+        
+        # Add journal_id to the result
+        result["journal_id"] = journal_id
+        
+        # Send results to the webhook URL
+        response = requests.post(webhook_url, json=result)
+        
+        # Log the webhook response
+        logger.info(f"Webhook response for journal_id {journal_id}: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to send webhook for journal_id {journal_id}: {response.text}")
+    
+    except Exception as e:
+        # Log the error
+        logger.error(f"Error processing journal_id {journal_id}: {str(e)}")
+        
+        # Send error to webhook
+        error_payload = {
+            "status": "error",
+            "journal_id": journal_id,
+            "error": str(e)
+        }
+        
+        try:
+            requests.post(webhook_url, json=error_payload)
+        except Exception as webhook_error:
+            logger.error(f"Failed to send error webhook for journal_id {journal_id}: {str(webhook_error)}")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))  
